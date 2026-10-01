@@ -180,10 +180,10 @@ void setMotor(const Motor &m, int cmd) {
   if (m.invert) cmd = -cmd;
   if (cmd > 0) {
     analogWrite(m.in1, cmd);
-    analogWrite(m.in2, cmd);
+    analogWrite(m.in2, 0);
   } else if (cmd < 0) {
-    analogWrite(m.in1, cmd);
-    analogWrite(m.in2, cmd);
+    analogWrite(m.in1, 0);
+    analogWrite(m.in2, -cmd);
   } else {
     analogWrite(m.in1, LO_ANALOG);
     analogWrite(m.in2, LO_ANALOG);
