@@ -27,12 +27,14 @@
 */
 
 #include <Arduino.h>
+#define LO_ANALOG 0
+#define HI_ANALOG 255
 
 // ============================ CONFIGURAÇÃO ============================
 
 // Sensor de linha digital de 8 canais. Índice 0 = sensor mais à esquerda.
 // A4 e A5 têm pull-up de I2C na placa; com saída digital do módulo funciona normalmente.
-const uint8_t LINE_PINS[8] = {A0, A1, A2, A3, A4, A5, A6, A7};
+const uint8_t LINE_PINS[8] = {5, 6, 7, 15, 16, 17, 18, 8};
 
 // Nível que o módulo entrega com o sensor SOBRE a linha.
 // Módulos com TCRT5000 + comparador costumam dar HIGH sobre a linha preta.
@@ -40,16 +42,16 @@ const uint8_t LINE_PINS[8] = {A0, A1, A2, A3, A4, A5, A6, A7};
 const int LINE_ON_LEVEL = HIGH;
 
 // Encoders ópticos (disco furado + sensor de fenda), um por roda
-const uint8_t  ENC_L_PIN = 2;
-const uint8_t  ENC_R_PIN = 3;
+const uint8_t  ENC_L_PIN = 4;
+const uint8_t  ENC_R_PIN = 14;
 const float    ENC_PPR   = 20.0f;           // número de furos do disco (pulsos por volta)
 const uint32_t ENC_MIN_INTERVAL_US = 1000;  // ignora pulsos mais próximos que isso (ruído na borda do furo)
 const uint32_t ENC_TIMEOUT_US = 300000;     // sem pulso por esse tempo: rpm = 0
 
 // Ponte H com PWM + IN1 + IN2 por motor (L298N, TB6612 e similares)
-struct Motor { uint8_t pwm, in1, in2; bool invert; };
-const Motor MOT_L = {5, 6, 7, false};    // invert = true se a roda girar ao contrário
-const Motor MOT_R = {9, 10, 11, false};
+struct Motor { uint8_t in1, in2; bool invert; };
+const Motor MOT_L = {13, 12, true};    // invert = true se a roda girar ao contrário
+const Motor MOT_R = {11, 10, false};
 
 // Botão de iniciar/parar, ligado entre o pino e GND
 const uint8_t BUTTON_PIN = 12;
@@ -99,7 +101,7 @@ uint32_t lastSeenMs  = 0;
 //
 // A interrupção só conta pulsos e guarda o instante do último.
 // A cada amostra o rpm é calculado pelo método M/T:
-//   rpm = 60e6 * pulsos / (PPR * tempo_entre_a_ultima_borda_da_janela_anterior_e_a_desta)
+//   rpm = 60e6 * pulsos / (PPR * tempo_entre_a_ultima_borda_da_janela_anterior_e_a_desta_em_us)
 // Isso dá boa resolução mesmo com poucos pulsos por janela (disco de 20 furos).
 // Janela sem pulso: o rpm vai caindo pelo limite 1 pulso / tempo decorrido,
 // e zera depois de ENC_TIMEOUT_US.
@@ -116,7 +118,7 @@ struct Encoder {
 
 Encoder encL, encR;
 
-void encoderEdge(Encoder &e) {
+void IRAM_ATTR encoderEdge(Encoder &e) {
   uint32_t now = micros();
   uint32_t dt  = now - e.lastUs;
   if (dt < ENC_MIN_INTERVAL_US) return;
@@ -125,8 +127,8 @@ void encoderEdge(Encoder &e) {
   e.count    = e.count + 1;
 }
 
-void isrEncL() { encoderEdge(encL); }
-void isrEncR() { encoderEdge(encR); }
+void IRAM_ATTR isrEncL() { encoderEdge(encL); }
+void IRAM_ATTR isrEncR() { encoderEdge(encR); }
 
 void updateRpm(Encoder &e, uint32_t nowUs) {
   noInterrupts();
@@ -177,22 +179,18 @@ void setMotor(const Motor &m, int cmd) {
   cmd = clampInt(cmd, -255, 255);
   if (m.invert) cmd = -cmd;
   if (cmd > 0) {
-    digitalWrite(m.in1, HIGH);
-    digitalWrite(m.in2, LOW);
-    analogWrite(m.pwm, cmd);
+    analogWrite(m.in1, cmd);
+    analogWrite(m.in2, cmd);
   } else if (cmd < 0) {
-    digitalWrite(m.in1, LOW);
-    digitalWrite(m.in2, HIGH);
-    analogWrite(m.pwm, -cmd);
+    analogWrite(m.in1, cmd);
+    analogWrite(m.in2, cmd);
   } else {
-    digitalWrite(m.in1, LOW);
-    digitalWrite(m.in2, LOW);
-    analogWrite(m.pwm, 0);
+    analogWrite(m.in1, LO_ANALOG);
+    analogWrite(m.in2, LO_ANALOG);
   }
 }
 
 void initMotor(const Motor &m) {
-  pinMode(m.pwm, OUTPUT);
   pinMode(m.in1, OUTPUT);
   pinMode(m.in2, OUTPUT);
   setMotor(m, 0);
@@ -202,9 +200,8 @@ void initMotor(const Motor &m) {
 
 uint8_t readLineRaw() {
   uint8_t bits = 0;
-  for (uint8_t i = 0; i < 8; i++) {
-    if (digitalRead(LINE_PINS[i]) == HIGH) bits |= (uint8_t)(1u << i);
-  }
+  for (uint8_t i = 0; i < 8; i++) 
+    bits |= (uint8_t)(digitalRead(LINE_PINS[i]) << i); // bitmasking
   return bits;
 }
 
