@@ -63,7 +63,7 @@ const Motor MOT_L = {13, 12, true};    // invert = true se a roda girar ao contr
 const Motor MOT_R = {11, 10, false};
 
 // Botão de iniciar/parar, ligado entre o pino e GND
-const uint8_t BUTTON_PIN = 12;
+// const uint8_t BUTTON_PIN = 12;
 
 // Amostragem e controle
 const uint32_t SAMPLE_PERIOD_MS = 20;    // 50 Hz
@@ -328,17 +328,17 @@ void stopRun(const char *why) {
 
 // ============================== ENTRADAS ==============================
 
-bool buttonPressed() {
-  static int      lastStable = HIGH, lastRead = HIGH;
-  static uint32_t changedAt  = 0;
-  int r = digitalRead(BUTTON_PIN);
-  if (r != lastRead) { lastRead = r; changedAt = millis(); }
-  if (millis() - changedAt > 30 && r != lastStable) {
-    lastStable = r;
-    return r == LOW;   // borda de descida = botão apertado
-  }
-  return false;
-}
+// bool buttonPressed() {
+//   static int      lastStable = HIGH, lastRead = HIGH;
+//   static uint32_t changedAt  = 0;
+//   int r = digitalRead(BUTTON_PIN);
+//   if (r != lastRead) { lastRead = r; changedAt = millis(); }
+//   if (millis() - changedAt > 30 && r != lastStable) {
+//     lastStable = r;
+//     return r == LOW;   // borda de descida = botão apertado
+//   }
+//   return false;
+// }
 
 void handleSerial() {
   while (Serial.available() > 0) {
@@ -428,7 +428,7 @@ void setup() {
   initMotor(MOT_L);
   initMotor(MOT_R);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  // pinMode(BUTTON_PIN, INPUT_PULLUP);
 
   lastTickMs = millis();
 }
@@ -436,10 +436,10 @@ void setup() {
 void loop() {
   handleSerial();
 
-  if (buttonPressed()) {
-    if (state == IDLE) arm();
-    else stopRun("botao");
-  }
+  // if (buttonPressed()) {
+  //   if (state == IDLE) arm();
+  //   else stopRun("botao");
+  // }
 
   uint32_t now = millis();
   if (now - lastTickMs >= SAMPLE_PERIOD_MS) {
