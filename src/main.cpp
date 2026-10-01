@@ -27,10 +27,19 @@
 */
 
 #include <Arduino.h>
+#include <Adafruit_NeoPixel.h>
+
+#define PIN_LED   48  // Pino conectado ao LED RGB na maioria dos ESP32-S3 DevKitC-1
+#define NUM_LEDS  1   // Quantidade de LEDs na placa
 #define LO_ANALOG 0
 #define HI_ANALOG 255
+#define LIGHT_BLUE strip.Color(0, 150, 0)
+#define LIGHT_OFF strip.Color(0, 0, 0)
 
 // ============================ CONFIGURAÇÃO ============================
+
+// Inicializa a biblioteca NeoPixel
+Adafruit_NeoPixel strip(NUM_LEDS, PIN_LED, NEO_GRB + NEO_KHZ800);
 
 // Sensor de linha digital de 8 canais. Índice 0 = sensor mais à esquerda.
 // A4 e A5 têm pull-up de I2C na placa; com saída digital do módulo funciona normalmente.
@@ -393,7 +402,8 @@ void tick() {
 
   // LED: aceso gravando, piscando enquanto armado
   bool led = (state == RECORDING) || (state == ARMED && ((nowMs / 100) % 2 == 0));
-  digitalWrite(LED_BUILTIN, led ? HIGH : LOW);
+  strip.setPixelColor(0, led ? LIGHT_BLUE : LIGHT_OFF);
+  strip.show();
 
   tickCount++;
   if (monitorOn && tickCount % (200 / SAMPLE_PERIOD_MS) == 0) printMonitor(raw);
@@ -402,6 +412,10 @@ void tick() {
 // ============================ SETUP / LOOP ============================
 
 void setup() {
+  strip.begin();
+  strip.setBrightness(30);
+  strip.show();
+
   Serial.begin(115200);   // sem while(!Serial): o robô precisa rodar só na bateria
 
   for (uint8_t i = 0; i < 8; i++) pinMode(LINE_PINS[i], INPUT);
@@ -415,7 +429,6 @@ void setup() {
   initMotor(MOT_R);
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(LED_BUILTIN, OUTPUT);
 
   lastTickMs = millis();
 }
