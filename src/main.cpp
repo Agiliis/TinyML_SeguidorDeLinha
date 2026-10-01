@@ -79,10 +79,10 @@ const uint32_t RUN_PERIOD_FROM_STANDBY = 30e3;     //
 const uint32_t STANDBY_PERIOD_MS  = 10e3;     // tempo fora do serial até o robô se armar para correr
 const uint32_t SAMPLE_PERIOD_MS   = 20;       // 50 Hz
 const uint32_t START_DELAY_MS     = 1000;     // tempo para tirar a mão do robô
-const int      BASE_PWM   = 120;              // velocidade na reta
+const int      BASE_PWM   = 90;              // velocidade na reta
 const float    KP         = 35.0f;            // ganho proporcional (PWM por posição de sensor)
 const float    KD         = 80.0f;            // ganho derivativo
-const int      SEARCH_PWM = 110;              // velocidade girando para reencontrar a linha
+const int      SEARCH_PWM = 70;              // velocidade girando para reencontrar a linha
 const uint32_t LOST_TIMEOUT_MS = 1500;        // linha perdida por mais que isso: encerra a corrida
 
 // Buffer na RAM: 16 bytes por amostra. 6000 amostras = ~96 KB = 2 min a 50 Hz
@@ -371,6 +371,8 @@ void stopRun(const char *why) {
 
   if (dadosDasCorridas) dadosDasCorridas.close();
 
+  lastStandbyRun = millis();
+
   char b[96];
   snprintf(b, sizeof(b), "# parado (%s). %lu amostras no buffer", why, (unsigned long)nSamples);
   msg(b);
@@ -477,7 +479,6 @@ void tick() {
 
     if (runFromStandby && nowMs - runStartMs >= RUN_PERIOD_FROM_STANDBY) {
         stopRun("fim da corrida");
-        lastStandbyRun = nowMs;
         runFromStandby = false;
         pwmL = pwmR = 0;   
     }
@@ -492,7 +493,7 @@ void tick() {
   strip.show();
 
   tickCount++;
-  if (monitorOn && tickCount % (200 / SAMPLE_PERIOD_MS) == 0) printMonitor(raw);
+  if (monitorOn && tickCount % (200 / SAMPLE_PERIOD_MS) == 0) printMonitor(onLineMask(raw));
 }
 
 // ============================ SETUP / LOOP ============================
@@ -502,7 +503,7 @@ void setup() {
   strip.setBrightness(30);
   strip.show();
 
-  Serial.begin(115200);   // sem while(!Serial): o robô precisa rodar só na bateria
+  // Serial.begin(115200);   // sem while(!Serial): o robô precisa rodar só na bateria
 
   if(!LittleFS.begin(true)) {
     msg("# Erro ao montar LittleFS");
