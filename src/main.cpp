@@ -36,8 +36,9 @@
 #define NUM_LEDS  1   // Quantidade de LEDs na placa
 #define LO_ANALOG 0
 #define HI_ANALOG 255
-#define LIGHT_BLUE strip.Color(0, 150, 0)
-#define LIGHT_RED strip.Color(0, 150, 0)
+#define LIGHT_BLUE strip.Color(0, 0, 150)
+#define LIGHT_RED strip.Color(155, 0, 0)
+#define LIGHT_GREEN strip.Color(0, 155, 0)
 #define LIGHT_OFF strip.Color(0, 0, 0)
 
 // ============================ CONFIGURAÇÃO ============================
@@ -74,13 +75,15 @@ const Motor MOT_R = {11, 10, false};
 // const uint8_t BUTTON_PIN = 12;
 
 // Amostragem e controle
-const uint32_t SAMPLE_PERIOD_MS = 20;    // 50 Hz
-const uint32_t START_DELAY_MS   = 1000;  // tempo para tirar a mão do robô
-const int      BASE_PWM   = 120;         // velocidade na reta
-const float    KP         = 35.0f;       // ganho proporcional (PWM por posição de sensor)
-const float    KD         = 80.0f;       // ganho derivativo
-const int      SEARCH_PWM = 110;         // velocidade girando para reencontrar a linha
-const uint32_t LOST_TIMEOUT_MS = 1500;   // linha perdida por mais que isso: encerra a corrida
+const uint32_t RUN_PERIOD_FROM_STANDBY = 30e3;     // 
+const uint32_t STANDBY_PERIOD_MS  = 10e3;     // tempo fora do serial até o robô se armar para correr
+const uint32_t SAMPLE_PERIOD_MS   = 20;       // 50 Hz
+const uint32_t START_DELAY_MS     = 1000;     // tempo para tirar a mão do robô
+const int      BASE_PWM   = 120;              // velocidade na reta
+const float    KP         = 35.0f;            // ganho proporcional (PWM por posição de sensor)
+const float    KD         = 80.0f;            // ganho derivativo
+const int      SEARCH_PWM = 110;              // velocidade girando para reencontrar a linha
+const uint32_t LOST_TIMEOUT_MS = 1500;        // linha perdida por mais que isso: encerra a corrida
 
 // Buffer na RAM: 16 bytes por amostra. 6000 amostras = ~96 KB = 2 min a 50 Hz
 const uint32_t MAX_SAMPLES = 6000;
@@ -107,8 +110,10 @@ uint32_t armedAtMs  = 0;
 uint32_t runStartMs = 0;
 uint8_t  runId      = 0;
 bool     monitorOn  = false;
+bool     runFromStandby = true;
 uint32_t lastTickMs = 0;
 uint32_t tickCount  = 0;
+uint32_t lastStandbyRun = 0;
 
 // Controle
 float    prevErr     = 0;
@@ -310,6 +315,7 @@ void dumpCsvFromFS() {
       strip.setPixelColor(0, LIGHT_RED);
       strip.show();
       delay(100);
+      i++;
     }
   }
   
@@ -336,6 +342,9 @@ void arm() {
 }
 
 void beginRun(uint32_t nowMs) {
+  strip.setPixelColor(0, LIGHT_GREEN);
+  strip.show();
+
   runId++;
   runStartMs  = nowMs;
   prevErr     = 0;
@@ -352,6 +361,9 @@ void beginRun(uint32_t nowMs) {
 }
 
 void stopRun(const char *why) {
+  strip.setPixelColor(0, LIGHT_OFF);
+  strip.show();
+
   if (state == IDLE) return;
   state = IDLE;
   setMotor(MOT_L, 0);
@@ -462,6 +474,13 @@ void tick() {
       stopRun("buffer cheio");
       pwmL = pwmR = 0;
     }
+
+    if (runFromStandby && nowMs - runStartMs >= RUN_PERIOD_FROM_STANDBY) {
+        stopRun("fim da corrida");
+        lastStandbyRun = nowMs;
+        runFromStandby = false;
+        pwmL = pwmR = 0;   
+    }
   }
 
   setMotor(MOT_L, pwmL);
@@ -518,6 +537,20 @@ void loop() {
   // }
 
   uint32_t now = millis();
+
+  if (!Serial && 
+      now - lastStandbyRun >= STANDBY_PERIOD_MS) {
+    
+      if (state == IDLE) {
+        strip.setPixelColor(0, LIGHT_BLUE);
+        strip.show();
+
+        runFromStandby = true;
+
+        arm();
+      }
+  }
+
   if (now - lastTickMs >= SAMPLE_PERIOD_MS) {
     lastTickMs += SAMPLE_PERIOD_MS;
     // Se ficou para trás (por exemplo depois do dump), realinha em vez de rodar vários ticks seguidos
