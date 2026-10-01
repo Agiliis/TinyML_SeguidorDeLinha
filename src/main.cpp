@@ -28,18 +28,26 @@
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+// #include "FS.h"
+#include <LittleFS.h>
+#define FORMAT_LITTLEFS_IF_FAILED true
 
 #define PIN_LED   48  // Pino conectado ao LED RGB na maioria dos ESP32-S3 DevKitC-1
 #define NUM_LEDS  1   // Quantidade de LEDs na placa
 #define LO_ANALOG 0
 #define HI_ANALOG 255
 #define LIGHT_BLUE strip.Color(0, 150, 0)
+#define LIGHT_RED strip.Color(0, 150, 0)
 #define LIGHT_OFF strip.Color(0, 0, 0)
 
 // ============================ CONFIGURAÇÃO ============================
 
 // Inicializa a biblioteca NeoPixel
 Adafruit_NeoPixel strip(NUM_LEDS, PIN_LED, NEO_GRB + NEO_KHZ800);
+
+// fs::FS lfs;
+// Arquivo onde os dados serao coletados para leitura no pc
+File dadosDasCorridas;
 
 // Sensor de linha digital de 8 canais. Índice 0 = sensor mais à esquerda.
 // A4 e A5 têm pull-up de I2C na placa; com saída digital do módulo funciona normalmente.
@@ -91,6 +99,7 @@ struct Sample {
 
 Sample   samples[MAX_SAMPLES];
 uint32_t nSamples = 0;
+uint32_t nLines = 0;
 
 enum State { IDLE, ARMED, RECORDING };
 State    state = IDLE;
@@ -291,6 +300,28 @@ void dumpCsv() {
   Serial.println("#FIM");
 }
 
+void dumpCsvFromFS() {
+  Serial.println("run,t_ms,s0,s1,s2,s3,s4,s5,s6,s7,rpm_l,rpm_r,pwm_l,pwm_r");
+  File file = LittleFS.open("/dados.csv", FILE_READ);
+  if (!file) {
+    Serial.println("# Arquivo vazio ou inexistente");
+    short i=0;
+    while(i<5) {
+      strip.setPixelColor(0, LIGHT_RED);
+      strip.show();
+      delay(100);
+    }
+  }
+  
+  // Lê o arquivo inteiro da Flash e envia para o PC
+  while (file.available()) {
+    Serial.write(file.read());
+  }
+  
+  file.close();
+  Serial.println("#FIM");
+}
+
 // ========================== MÁQUINA DE ESTADOS ==========================
 
 void arm() {
@@ -311,6 +342,10 @@ void beginRun(uint32_t nowMs) {
   lastSeenErr = 0;
   lastSeenMs  = nowMs;
   state       = RECORDING;
+
+  dadosDasCorridas = LittleFS.open("/dados.csv", FILE_APPEND);
+  if (!dadosDasCorridas) msg("# Erro ao abrir o arquivo de gravação!");
+
   char b[40];
   snprintf(b, sizeof(b), "# corrida %u gravando", (unsigned)runId);
   msg(b);
@@ -321,9 +356,14 @@ void stopRun(const char *why) {
   state = IDLE;
   setMotor(MOT_L, 0);
   setMotor(MOT_R, 0);
+
+  if (dadosDasCorridas) dadosDasCorridas.close();
+
   char b[96];
   snprintf(b, sizeof(b), "# parado (%s). %lu amostras no buffer", why, (unsigned long)nSamples);
   msg(b);
+  // snprintf(b, sizeof(b), "%lu amostras no arquivo", why, (unsigned long)nSamples);
+  // msg(b);
 }
 
 // ============================== ENTRADAS ==============================
@@ -344,21 +384,27 @@ void handleSerial() {
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
     switch (c) {
-      case 'r': arm(); break;
-      case 's': stopRun("comando"); break;
-      case 'd':
-        if (state == IDLE) dumpCsv();
-        else msg("# pare a gravacao antes (s)");
-        break;
-      case 'c':
-        if (state == IDLE) { nSamples = 0; runId = 0; msg("# buffer apagado"); }
-        break;
-      case 'v':
-        monitorOn = !monitorOn;
-        msg(monitorOn ? "# monitor ligado" : "# monitor desligado");
-        break;
-      case '?': printStatus(); break;
-      default: break;   // ignora \r, \n e o resto
+    case 'r': arm(); break;
+    case 's': stopRun("comando"); break;
+    case 'd':
+      if (state == IDLE) dumpCsvFromFS();
+      else msg("# pare a gravacao antes (s)");
+      break;
+    case 'c':
+      if (state != IDLE) break;
+      nSamples = 0; 
+      runId = 0; 
+      msg("# buffer apagado");
+      // ------------+-----------
+      LittleFS.remove("/dados.csv");
+      msg("# Arquivo apagado do LittleFS");
+      break;
+    case 'v':
+      monitorOn = !monitorOn;
+      msg(monitorOn ? "# monitor ligado" : "# monitor desligado");
+      break;
+    case '?': printStatus(); break;
+    default: break;   // ignora \r, \n e o resto
     }
   }
 }
@@ -379,14 +425,35 @@ void tick() {
   if (state == RECORDING) {
     bool seen = followLine(onLineMask(raw), nowMs, pwmL, pwmR);
 
-    Sample &s = samples[nSamples++];
-    s.t_ms      = nowMs - runStartMs;
-    s.rpm_l_x10 = rpmX10(encL.rpm);
-    s.rpm_r_x10 = rpmX10(encR.rpm);
-    s.pwm_l     = (int16_t)pwmL;
-    s.pwm_r     = (int16_t)pwmR;
-    s.sensors   = raw;
-    s.run       = runId;
+    // Caso ele fosse salvar no array
+    // Sample &s = samples[nSamples++];
+    // s.t_ms      = nowMs - runStartMs;
+    // s.rpm_l_x10 = rpmX10(encL.rpm);
+    // s.rpm_r_x10 = rpmX10(encR.rpm);
+    // s.pwm_l     = (int16_t)pwmL;
+    // s.pwm_r     = (int16_t)pwmR;
+    // s.sensors   = raw;
+    // s.run       = runId;
+
+    // nSamples++;
+    if (dadosDasCorridas) {
+      // Serial.println("run,t_ms,s0,s1,s2,s3,s4,s5,s6,s7,rpm_l,rpm_r,pwm_l,pwm_r");
+      char line[112];
+      int n = snprintf(line, sizeof(line), "%u,%lu", (unsigned)runId, (unsigned long)(nowMs - runStartMs));
+      for (uint8_t i = 0; i < 8; i++) {
+        n += snprintf(line + n, sizeof(line) - n, ",%u", (unsigned)((raw >> i) & 1u));
+      }
+      
+      uint16_t l_x10 = rpmX10(encL.rpm);
+      uint16_t r_x10 = rpmX10(encR.rpm);
+      
+      snprintf(line + n, sizeof(line) - n, ",%u.%u,%u.%u,%d,%d\n",
+               (unsigned)(l_x10 / 10), (unsigned)(l_x10 % 10),
+               (unsigned)(r_x10 / 10), (unsigned)(r_x10 % 10),
+               pwmL, pwmR);
+               
+      dadosDasCorridas.print(line); // Salva na memória Flash
+    }
 
     if (!seen && nowMs - lastSeenMs > LOST_TIMEOUT_MS) {
       stopRun("linha perdida");
@@ -417,6 +484,15 @@ void setup() {
   strip.show();
 
   Serial.begin(115200);   // sem while(!Serial): o robô precisa rodar só na bateria
+
+  if(!LittleFS.begin(true)) {
+    msg("# Erro ao montar LittleFS");
+    while(1) {
+      strip.setPixelColor(0, LIGHT_RED);
+      strip.show();
+      delay(10);
+    }
+  }
 
   for (uint8_t i = 0; i < 8; i++) pinMode(LINE_PINS[i], INPUT);
 
